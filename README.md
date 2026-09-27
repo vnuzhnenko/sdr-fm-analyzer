@@ -1,5 +1,9 @@
-This is a research project for hands-on learning of Software Defined Radio (SDR), particullary with HackRF One,
-in C language.
+This is a research project for hands-on learning of Software Defined Radio (SDR), particullary with HackRF One.
+
+`sdr-fm-analyzer` is a lightweight, real-time Software-Defined Radio (SDR) FM receiver written in C. It interfaces with the HackRF One to capture
+raw radio frequency samples, tunes to a target FM broadcast station, processes the signal through a complete digital signal processing (DSP) pipeline,
+and outputs uncompressed audio for real-time playback.
+In essence, it is a software FM radio receiver built from scratch with zero external DSP dependencies.
 
 ## Goals
 
