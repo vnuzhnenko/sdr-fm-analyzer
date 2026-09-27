@@ -35,6 +35,10 @@ in C language.
 
 ## HackRF One
 
+![HackRF One](https://raw.github.com/mossmann/hackrf/master/docs/images/HackRF-One-fd0-0009.jpeg)
+
+(photo by fd0 from https://github.com/fd0/hackrf-one-pictures)
+
 - Product page: https://greatscottgadgets.com/hackrf/one/
 - Documentation: https://hackrf.readthedocs.io/en/latest/
 - HackRF repository: https://github.com/greatscottgadgets/hackrf/
