@@ -59,6 +59,8 @@ size_t ring_buffer_write(ring_buffer_t *rb, const uint8_t *data, size_t length) 
     }
 
     size_t to_write = (length < available) ? length : available;
+    // Clear bit 0: guarantees to_write is alway even, to keep every I/Q pair together
+    to_write &= ~1UL;
     size_t head = atomic_load_explicit(&rb->head, memory_order_relaxed);
 
     /* 1. Copy first chunk (from head up to the physical end of the buffer) */
@@ -92,6 +94,8 @@ size_t ring_buffer_read(ring_buffer_t *rb, uint8_t *dest, size_t length) { // TO
     }
 
     size_t to_read = (length < available) ? length : available;
+    // Clear bit 0: guarantees to_read is alway even, to keep every I/Q pair together
+    to_read &= ~1UL;
     size_t tail = atomic_load_explicit(&rb->tail, memory_order_relaxed);
 
     // Copy first chunk from tail up to the end of the buffer

@@ -33,4 +33,4 @@ clean:
 	@echo "Clean complete."
 
 run: $(TARGET)
-	./$(TARGET) | ffplay -f s16le -ar 48000 -
+	./$(TARGET) | ffplay -nodisp -autoexit -probesize 32 -f s16le -ar 48000 -

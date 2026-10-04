@@ -98,13 +98,12 @@ $ make
 
 ### Running with a pipe to sound system
 
-Option 1, with [aplay](https://linux.die.net/man/1/aplay):
-```bash
-./bin/fm-analyzer -f 101500000 | aplay -r 48000 -f S16_LE -c 1 -t raw
-```
-
-
-Option 2,  with [ffplay](https://ffmpeg.org/ffplay.html) (part of FFmpeg): 
+With [ffplay](https://ffmpeg.org/ffplay.html) (part of FFmpeg):
 ```sh
-./bin/fm-analyzer -f 101500000 | ffplay -f s16le -ar 48000 -
+./bin/fm-analyzer -f 101500000 | ffplay -nodisp -autoexit -probesize 32 -f s16le -ar 48000 -
 ```
+
+The follwoing parameters are needed to avoid a pipe backpressure:
+
+* `-nodisp`: Disables video window creation (instant startup)
+* `-probesize 32`: Tells ffplay not to buffer thousands of bytes trying to guess the format
