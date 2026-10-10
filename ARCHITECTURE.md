@@ -61,25 +61,25 @@ The are several motivations while working on this project:
 
 ```mermaid
 C4Container
-title Context & Container Diagram for SDR FM Analyzer
+title C4: Context & Container Diagram for SDR FM Analyzer
 
 Person(user, "FM radio listener", "Controls tuning, volume and listens to audio")
 System_Boundary(c2, "SDR FM Analyzer") {
+    Container(webApp, "Web UI", "Typescript", "Browser-based UI and audio player")
     Container(consoleApp, "Terminal UI / Webserver", "Go", "TUI, Audio and process orchestration")
     Container(backend, "I/O processing backend", "C language", "Connects to HackRF")
-    Container(webApp, "Web UI", "Typescript", "Browser-based UI and audio player")
 }
 System_Ext(audioOut, "Audio subsystem", "Soundcard (ffplay)")
 System_Ext(hackrf, "HackRF One", "HackRF One reciever hardware")
 
-Rel(user, webApp, "Controls tuning / listens to audio", "Graphic UI")
-Rel(user, consoleApp, "Controls tuning / listens to audio", "Terminal UI")
-Rel(webApp, consoleApp, "Tunes radio, streams audio", "HTTP / Websocket")
-Rel(consoleApp, backend, "Launches & configures, reads audio/metadata", "Unix pipe / IPC")
-Rel(backend, hackrf, "Configures a driver, reads I/Q samples", "USB, libhackrf")
-Rel(consoleApp, audioOut, "Streams 48kHz audio", "stdout pipe")
-Rel(webApp, audioOut, "Plays audio", "Web Audio API")
-Rel(audioOut, user, "Emits sound", "Speakers")
+Rel_D(user, webApp, "Controls tuning / listens to audio", "Graphic UI")
+Rel_D(user, consoleApp, "Controls tuning / listens to audio", "Terminal UI")
+Rel_R(webApp, consoleApp, "Tunes radio, streams audio", "HTTP / Websocket")
+Rel_D(consoleApp, backend, "Launches & configures, reads audio/metadata", "Unix pipe / IPC")
+Rel_D(backend, hackrf, "Configures a driver, reads I/Q samples", "USB, libhackrf")
+Rel_R(consoleApp, audioOut, "Streams 48kHz audio", "stdout pipe")
+Rel_U(webApp, audioOut, "Plays audio", "Web Audio API")
+Rel_U(audioOut, user, "Emits sound", "Speakers")
 
 UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 ``` 
