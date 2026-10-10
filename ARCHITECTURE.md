@@ -71,15 +71,48 @@ The SDR FM Analyzer captures radio frequency broadcasts, demodulates commercial 
 
 ## Technical Context
 
-| Interface / Partner | Channel type| Protocol | Data Format / Payload |
+| Interface | Channel type| Protocol | Data Format / Payload |
 |:---|--|--|--|
 | HackRF One | USB 2.0 peripheral | `libhackrf` driver API | Interleaved 8-bit signed quadrature pairs (`int8_t` I/Q at 8-20 MSPS) |
 | Audio Subsystem (ffplay / ALSA) | Linux OS Pipe (`stdout`) | Unix stream pipe, 64Kb buffer | 48 kHz, 16-bit signed little-endian PCM (`int16_t` mono/stereo) |
 | Terminal UI (Go) | Host terminal | ANSI / VT100, `stdin/stderr` | Text commands, telemetry strings |
 | Web UI (Browser) | Local network / loopback | HTTP + WebSockets | HTML/JS assets, JSON control messages, Web Audio streams |
 
+#### Handling of high sample rate in software
 
-### Context & Container Diagram
+Processing of raw radio high frequency signal, like 2.4 or 5 GHz, is computationally
+impossible operation for even modern CPUs that also work at the same frequency around
+3 GHz and it exceed USB 2.0 throughput. For that reason, SDR hardware downconverts the
+signal of interest to complex baseband of 0 Hz without losing the information it carries. 
+The software receives only the bandwidth of interest (e.g. 2–10 MSPS over USB 2.0),
+which is easily processed by a standard CPU.
+
+#### HackRF One center spike
+
+HackRF One should be tuned a bit left or right from frequency of interest due to the high 
+signal spike right at the center of bandwidth it captures.
+This phenomenon is called DC offset and it is caused by Local Oscillator (LO) leakage.
+To overcome this, the project uses a techniqe called Offset Tuning (Off-tuning) when hardware
+is tuned at e.g. 250 KHz away, and the software shifts it back digitally using a complex mixer.
+
+#### FM bandwidh layout
+
+FM Multiplex (MPX) baseband spectrum contains different types of signals - audio and metadata - that should be
+demodulated by applying different alorithms. Also, audio information is split into two
+ranges within the FM bandwidth - mono and stereo. While mono signal is self-contained
+and can be demodulated independently from anything else, stereo signal is mathematically
+dependent on mono signal and should be processed strictly in-phase.
+The FM spectrum layout:
+* Mono (L + R): Baseband audio (30 Hz - 15 kHz)
+* Pilot tone: 19 kHz reference phase for stereo signal recovery
+* Stereo (L - R): DSB-SC modulated around 38 kHz (2 × 19 kHz)
+* Matrix decoding: Left and Right are extracted via (L + R) + (L - R) = 2L and (L + R) - (L - R) = 2R
+
+# Solution Strategy
+
+# Building Block View
+
+## Context & Container Diagram
 
 ```mermaid
 C4Container
@@ -106,12 +139,6 @@ Rel_U(audioOut, user, "Emits sound", "Speakers")
 UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 ``` 
 
-## Technical Context
-
-# Solution Strategy
-
-# Building Block View
-
 # Runtime View
 
 # Deployment View
@@ -120,12 +147,9 @@ UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 
 # Architecture Decisions
 
-- Split DSP pipeline into modules: to apply asynchronous and decoupled data processing to allow data handling at different rates and allow sclaing
-- Use Ring Buffer to consume data from HackRF One driver 
-
 # Quality Requirements
 
-### QR-1: DSP pipeline should work smoothly on avarage laptop/desktop hadrware
+### QR-1: DSP pipeline should work smoothly on average laptop/desktop hadrware
 * Latency: real-time audio playback latency is < 200 ms buffer delay
 * Resource limits: CPU utilization < 30% on a standard 2-core x86_64 laptop at 2.0 MSPS I/Q input rate
 * Robustness: Zero audio glitches under steady-state operation
