@@ -59,6 +59,28 @@ The are several motivations while working on this project:
 
 # Context and Scope
 
+## Business context
+
+The SDR FM Analyzer captures radio frequency broadcasts, demodulates commercial FM radio stations and delivers real-time audio and metadata to listeners.
+
+| Actor | Input to System | Output from System | Domain Responsibility |
+|:---|--|--|--|
+| FM Radio Listener | Tuning frequency, gain levels and volume | Decoded audio (music/voice), RDS metadata (song title, station callsign) | Interacts with UI, provides configuration, listens to broadcasts |
+| FM Radio Broadcasters | Over-the-air RF electromagnetic waves (87.5 – 109.0 MHz) | None | Transmit FM multiplex (MPX) signals (Mono, Stereo, RDS) |
+| OS Audio Subsystem | None | 48 kHz PCM audio stream | Converts digital audio samples into acoustic sound waves |
+
+## Technical Context
+
+| Interface / Partner | Channel type| Protocol | Data Format / Payload |
+|:---|--|--|--|
+| HackRF One | USB 2.0 peripheral | `libhackrf` driver API | Interleaved 8-bit signed quadrature pairs (`int8_t` I/Q at 8-20 MSPS) |
+| Audio Subsystem (ffplay / ALSA) | Linux OS Pipe (`stdout`) | Unix stream pipe, 64Kb buffer | 48 kHz, 16-bit signed little-endian PCM (`int16_t` mono/stereo) |
+| Terminal UI (Go) | Host terminal | ANSI / VT100, `stdin/stderr` | Text commands, telemetry strings |
+| Web UI (Browser) | Local network / loopback | HTTP + WebSockets | HTML/JS assets, JSON control messages, Web Audio streams |
+
+
+### Context & Container Diagram
+
 ```mermaid
 C4Container
 title C4: Context & Container Diagram for SDR FM Analyzer
