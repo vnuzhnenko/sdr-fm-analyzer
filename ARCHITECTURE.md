@@ -59,6 +59,53 @@ The are several motivations while working on this project:
 
 # Context and Scope
 
+## Business context
+
+The SDR FM Analyzer captures radio frequency broadcasts, demodulates commercial FM radio stations and delivers real-time audio and metadata to listeners.
+
+| Actor | Input to System | Output from System | Domain Responsibility |
+|:---|--|--|--|
+| FM Radio Listener | Tuning frequency, gain levels and volume | Decoded audio (music/voice), RDS metadata (song title, station callsign) | Interacts with UI, provides configuration, listens to broadcasts |
+| FM Radio Broadcasters | Over-the-air RF electromagnetic waves (87.5 – 109.0 MHz) | None | Transmit FM multiplex (MPX) signals (Mono, Stereo, RDS) |
+| OS Audio Subsystem | None | 48 kHz PCM audio stream | Converts digital audio samples into acoustic sound waves |
+
+## Technical Context
+
+| Interface / Partner | Channel type| Protocol | Data Format / Payload |
+|:---|--|--|--|
+| HackRF One | USB 2.0 peripheral | `libhackrf` driver API | Interleaved 8-bit signed quadrature pairs (`int8_t` I/Q at 8-20 MSPS) |
+| Audio Subsystem (ffplay / ALSA) | Linux OS Pipe (`stdout`) | Unix stream pipe, 64Kb buffer | 48 kHz, 16-bit signed little-endian PCM (`int16_t` mono/stereo) |
+| Terminal UI (Go) | Host terminal | ANSI / VT100, `stdin/stderr` | Text commands, telemetry strings |
+| Web UI (Browser) | Local network / loopback | HTTP + WebSockets | HTML/JS assets, JSON control messages, Web Audio streams |
+
+
+### Context & Container Diagram
+
+```mermaid
+C4Container
+title C4: Context & Container Diagram for SDR FM Analyzer
+
+Person(user, "FM radio listener", "Controls tuning, volume and listens to audio")
+System_Boundary(c2, "SDR FM Analyzer") {
+    Container(webApp, "Web UI", "Typescript", "Browser-based UI and audio player")
+    Container(consoleApp, "Terminal UI / Webserver", "Go", "TUI, Audio and process orchestration")
+    Container(backend, "I/O processing backend", "C language", "Connects to HackRF")
+}
+System_Ext(audioOut, "Audio subsystem", "Soundcard (ffplay)")
+System_Ext(hackrf, "HackRF One", "HackRF One reciever hardware")
+
+Rel_D(user, webApp, "Controls tuning / listens to audio", "Graphic UI")
+Rel_D(user, consoleApp, "Controls tuning / listens to audio", "Terminal UI")
+Rel_R(webApp, consoleApp, "Tunes radio, streams audio", "HTTP / Websocket")
+Rel_D(consoleApp, backend, "Launches & configures, reads audio/metadata", "Unix pipe / IPC")
+Rel_D(backend, hackrf, "Configures a driver, reads I/Q samples", "USB, libhackrf")
+Rel_R(consoleApp, audioOut, "Streams 48kHz audio", "stdout pipe")
+Rel_U(webApp, audioOut, "Plays audio", "Web Audio API")
+Rel_U(audioOut, user, "Emits sound", "Speakers")
+
+UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
+``` 
+
 ## Technical Context
 
 # Solution Strategy
