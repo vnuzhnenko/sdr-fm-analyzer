@@ -14,6 +14,10 @@ In essence, it is a software FM radio receiver built from scratch with zero exte
 - Demodulate FM signal [done]
 - Output as audio stream [done]
 
+## Architecture
+
+System architecture, context boundaries, C4 container & component diagrams, solution strategy are documented according to the arc42 framework in [ARCHITECTURE.md](./ARCHITECTURE.md).
+
 ## Study materials
 
 ### General resources
@@ -35,6 +39,8 @@ In essence, it is a software FM radio receiver built from scratch with zero exte
    * [The Hamming Window in FFT and FIR Filter Design](./docs/hamming-window.md)
    * [FM Demodulation with atan2 and the Polar Discriminator](./docs/fm-demodulation-atan2.md)
    * [Fractional Resampling (250 kHz to 48 kHz Audio)](./docs/fractional-resampling.md)
+   * [FM Station Metadata and the RDS Subcarrier](./docs/fm-rds-metadata.md)
+   * [FM Stereo Broadcasting, the 19 kHz Pilot Tone, and the 38 kHz Subcarrier](./docs/fm-stereo-pilot-tone.md)
 
 
 ## HackRF One
