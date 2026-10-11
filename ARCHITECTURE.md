@@ -124,11 +124,15 @@ some of them in runtime as per configuration.
 
 # Building Block View
 
-The follwing table lists external systems and internal containers that the SDR FM Analyzer consists of:
+The following table lists the external systems and internal containers that comprise the SDR FM Analyzer:
 
-| Name | External/Internal | Hardware/Software | Description |
-|--|--|--|--|
-| I/Q Processing backend | Internal | Software | Connects to HackRF One via libhackrf driver. Configures the driver and tunes to the FM station. Performs Digital Signal Processing of I/Q samples. Produces the audio stream
+| Name | External / Internal | Hardware / Software | Description |
+| :--- | :--- | :--- | :--- |
+| I/Q Processing Backend | Internal | Software | C binary. Interfaces with HackRF One via `libhackrf`, consumes raw I/Q samples, executes the DSP pipeline, and streams decoded PCM audio to `stdout`. |
+| Terminal UI / Webserver | Internal | Software | Go application. Supervises the C backend process, provides a terminal UI (TUI), and hosts the HTTP/WebSocket bridge for browser clients. |
+| Web UI | Internal | Software | TypeScript/Browser application. Allows the user to tune frequencies, adjust volume, view RDS metadata, and play audio directly in the browser. |
+| HackRF One | External | Hardware | Half-duplex SDR transceiver. Captures radio frequency signals (1 MHz – 6 GHz) and streams raw I/Q baseband pairs over USB 2.0. |
+| Audio Subsystem | External | Software / Hardware | Host soundcard / audio player (e.g. `ffplay`, ALSA, PulseAudio) that receives PCM audio streams from pipes and drives physical speakers. |
 
 ## Context & Container Diagram
 
@@ -160,6 +164,17 @@ UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 ``` 
 
 ## Component diagram
+
+The following table details the internal components of the I/Q Processing Backend:
+
+| Component | Type | Description |
+| :--- | :--- | :--- |
+| CLI Processor | Software module | Parses command-line arguments (target FM frequency, LNA/VGA gains, output options) and displays help text. |
+| Configuration | Data structure | Encapsulates immutable runtime configuration passed from the CLI to initialize hardware and DSP stages. |
+| HackRF Driver Wrapper | External driver (`libhackrf`) | Initializes the USB device, configures hardware registers (tuner frequency, gains), and receives streaming I/Q callbacks. |
+| Ring Buffer | Concurrency queue | Lock-free Single-Producer Single-Consumer (SPSC) circular buffer with C11 atomics. Decouples high-priority USB transfers from DSP processing. |
+| DSP Pipeline | Core logic | Performs frequency mixing (off-tuning correction), decimation, FM polar discrimination, de-emphasis, and audio resampling. |
+| Orchestrator | Process coordinator | Manages application lifecycle, drives the consumer loop reading from the ring buffer, invokes DSP blocks, and writes PCM frames to `stdout`. |
 
 Notice: Mermaid diagram renders the PlantUML C4 extension poorly
 
