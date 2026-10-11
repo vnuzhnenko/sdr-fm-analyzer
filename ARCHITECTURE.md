@@ -59,7 +59,7 @@ The are several motivations while working on this project:
 
 # Context and Scope
 
-## Business context
+## Domain context
 
 The SDR FM Analyzer captures radio frequency broadcasts, demodulates commercial FM radio stations and delivers real-time audio and metadata to listeners.
 
@@ -71,25 +71,82 @@ The SDR FM Analyzer captures radio frequency broadcasts, demodulates commercial 
 
 ## Technical Context
 
-| Interface / Partner | Channel type| Protocol | Data Format / Payload |
+| Interface | Channel type| Protocol | Data Format / Payload |
 |:---|--|--|--|
 | HackRF One | USB 2.0 peripheral | `libhackrf` driver API | Interleaved 8-bit signed quadrature pairs (`int8_t` I/Q at 8-20 MSPS) |
 | Audio Subsystem (ffplay / ALSA) | Linux OS Pipe (`stdout`) | Unix stream pipe, 64Kb buffer | 48 kHz, 16-bit signed little-endian PCM (`int16_t` mono/stereo) |
 | Terminal UI (Go) | Host terminal | ANSI / VT100, `stdin/stderr` | Text commands, telemetry strings |
 | Web UI (Browser) | Local network / loopback | HTTP + WebSockets | HTML/JS assets, JSON control messages, Web Audio streams |
 
+#### Handling of high sample rate in software
 
-### Context & Container Diagram
+Processing of raw radio high frequency signal, like 2.4 or 5 GHz, is computationally
+impossible operation for even modern CPUs that also work at the same frequency around
+3 GHz and it exceed USB 2.0 throughput. For that reason, SDR hardware downconverts the
+signal of interest to complex baseband of 0 Hz without losing the information it carries. 
+The software receives only the bandwidth of interest (e.g. 2–10 MSPS over USB 2.0),
+which is easily processed by a standard CPU.
+
+#### HackRF One center spike
+
+HackRF One should be tuned a bit left or right from frequency of interest due to the high 
+signal spike right at the center of bandwidth it captures.
+This phenomenon is called DC offset and it is caused by Local Oscillator (LO) leakage.
+To overcome this, the project uses a techniqe called Offset Tuning (Off-tuning) when hardware
+is tuned at e.g. 250 KHz away, and the software shifts it back digitally using a complex mixer.
+
+#### FM bandwidh layout
+
+FM Multiplex (MPX) baseband spectrum contains different types of signals - audio and metadata - that should be
+demodulated by applying different alorithms. Besides that, audio information is split into two
+ranges within the FM bandwidth - mono and stereo. While mono signal is self-contained
+and can be demodulated independently from anything else, stereo signal is mathematically
+dependent on mono signal and should be processed strictly in-phase.
+The FM spectrum layout:
+* Mono (L + R): Baseband audio (30 Hz - 15 kHz)
+* Pilot tone: 19 kHz reference phase for stereo signal recovery
+* Stereo (L - R): DSB-SC modulated around 38 kHz (2 × 19 kHz)
+* Matrix decoding: Left and Right are extracted via (L + R) + (L - R) = 2L and (L + R) - (L - R) = 2R
+
+# Solution Strategy
+
+1. Introduce and decouple the I/Q Processing Backend from frontend user interfaces. This also allows to support multiple frontends written in different technologies.
+1. The I/Q Processing Backend receives initial configuration - like FM
+frequency - via CLI parameters. This allows to use and test it in isolation from other components. This does not mean that this is the only way to configure the backend.
+Future implementation could support re-configuration in runtime via `STDIN`.
+1. The I/Q processing backend outputs a stream of audio data via `STDOUT`. This allows to
+use a standard Unix pipe to route this data to any 3rd party program that supports
+audio playback or just write it into a file. This approach also moves audio device playback and driver complexity outside the core DSP binary, keeping the backend focused on signal processing.
+1. Use Ring Buffer to allow asynchronous data transfer from HackRF to the I/Q processing backend.
+1. Downsample and downconvert data step-by-step to (a) lower the CPU usage, (b) support receiving wide sample rate range from 8 MSPS to 20 MSPS, (c) run different DSP algorithms at the most suitable sample rate.
+1. Split DSP pipeline into modules: to apply asynchronous and decoupled data processing to allow data handling at different rates and allow functional scaling to cover new requirements without refactoring. This also allows to selectively activate / deactivate
+some of them in runtime as per configuration.
+
+# Building Block View
+
+The following table lists the external systems and internal containers that comprise the SDR FM Analyzer:
+
+| Name | External / Internal | Hardware / Software | Description |
+| :--- | :--- | :--- | :--- |
+| I/Q Processing Backend | Internal | Software | C binary. Interfaces with HackRF One via `libhackrf`, consumes raw I/Q samples, executes the DSP pipeline, and streams decoded PCM audio to `stdout`. |
+| Terminal UI / Webserver | Internal | Software | Go application. Supervises the C backend process, provides a terminal UI (TUI), and hosts the HTTP/WebSocket bridge for browser clients. |
+| Web UI | Internal | Software | TypeScript/Browser application. Allows the user to tune frequencies, adjust volume, view RDS metadata, and play audio directly in the browser. |
+| HackRF One | External | Hardware | Half-duplex SDR transceiver. Captures radio frequency signals (1 MHz – 6 GHz) and streams raw I/Q baseband pairs over USB 2.0. |
+| Audio Subsystem | External | Software / Hardware | Host soundcard / audio player (e.g. `ffplay`, ALSA, PulseAudio) that receives PCM audio streams from pipes and drives physical speakers. |
+
+## Context & Container Diagram
+
+Notice: Mermaid diagram renders the PlantUML C4 extension poorly
 
 ```mermaid
 C4Container
-title C4: Context & Container Diagram for SDR FM Analyzer
+title C4: Context & Container Diagram of SDR FM Analyzer (as a code)
 
 Person(user, "FM radio listener", "Controls tuning, volume and listens to audio")
 System_Boundary(c2, "SDR FM Analyzer") {
     Container(webApp, "Web UI", "Typescript", "Browser-based UI and audio player")
     Container(consoleApp, "Terminal UI / Webserver", "Go", "TUI, Audio and process orchestration")
-    Container(backend, "I/O processing backend", "C language", "Connects to HackRF")
+    Container(backend, "I/Q processing backend", "C language", "Connects to HackRF")
 }
 System_Ext(audioOut, "Audio subsystem", "Soundcard (ffplay)")
 System_Ext(hackrf, "HackRF One", "HackRF One reciever hardware")
@@ -106,26 +163,60 @@ Rel_U(audioOut, user, "Emits sound", "Speakers")
 UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 ``` 
 
-## Technical Context
+## Component diagram
 
-# Solution Strategy
+The following table details the internal components of the I/Q Processing Backend:
 
-# Building Block View
+| Component | Type | Description |
+| :--- | :--- | :--- |
+| CLI Processor | Software module | Parses command-line arguments (target FM frequency, LNA/VGA gains, output options) and displays help text. |
+| Configuration | Data structure | Encapsulates immutable runtime configuration passed from the CLI to initialize hardware and DSP stages. |
+| HackRF Driver Wrapper | External driver (`libhackrf`) | Initializes the USB device, configures hardware registers (tuner frequency, gains), and receives streaming I/Q callbacks. |
+| Ring Buffer | Concurrency queue | Lock-free Single-Producer Single-Consumer (SPSC) circular buffer with C11 atomics. Decouples high-priority USB transfers from DSP processing. |
+| DSP Pipeline | Core logic | Performs frequency mixing (off-tuning correction), decimation, FM polar discrimination, de-emphasis, and audio resampling. |
+| Orchestrator | Process coordinator | Manages application lifecycle, drives the consumer loop reading from the ring buffer, invokes DSP blocks, and writes PCM frames to `stdout`. |
 
-# Runtime View
+Notice: Mermaid diagram renders the PlantUML C4 extension poorly
 
-# Deployment View
+```mermaid
+C4Component
+title C4: Component Diagram of SDR FM Analyzer (as a code)
+
+System_Ext(audioOut, "Audio subsystem", "Soundcard (ffplay)")
+Container_Ext(hackrf, "HackRF One", "HackRF One receiver hardware")
+
+Container_Boundary(cb, "I/Q processing backend") {
+    Component(configuration, "Configuration")
+    ComponentQueue(ringBuffer,"Ring buffer")
+    Component_Ext(hackrfDriver, "HackRF Driver")
+    Component(dspPipeline, "DSP Pipeline")
+    Component(orchestrator, "Orchestrator")
+    Component(cli, "CLI processor")
+
+    Rel(orchestrator, configuration, "Uses configuration")
+    Rel(orchestrator, ringBuffer, "Checks buffer, reads I/Q samples")
+    Rel(orchestrator, dspPipeline, "Initializes pipeline, starts processing of the next buffer chunk")
+    Rel(orchestrator, hackrfDriver, "Configures hardware, tunes RF frequency")
+    Rel(hackrfDriver, ringBuffer, "Writes I/Q samples")
+    Rel(cli, orchestrator, "Initializes the flow")
+    Rel(cli, configuration, "Creates configuration")
+}
+Person(user, "FM radio listener", "Controls tuning, volume and listens to audio")
+Rel(hackrfDriver, hackrf, "Configures device, reads I/Q samples", "USB")
+Rel(orchestrator, audioOut, "Outputs raw audio stream", "Unix pipe")
+Rel(user, cli, "Executes with CLI arguments")
+
+
+UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
+```
 
 # Cross-cutting Concepts
 
-# Architecture Decisions
-
-- Split DSP pipeline into modules: to apply asynchronous and decoupled data processing to allow data handling at different rates and allow sclaing
-- Use Ring Buffer to consume data from HackRF One driver 
+* The only supported language is English
 
 # Quality Requirements
 
-### QR-1: DSP pipeline should work smoothly on avarage laptop/desktop hadrware
+### QR-1: DSP pipeline should work smoothly on average laptop/desktop hadrware
 * Latency: real-time audio playback latency is < 200 ms buffer delay
 * Resource limits: CPU utilization < 30% on a standard 2-core x86_64 laptop at 2.0 MSPS I/Q input rate
 * Robustness: Zero audio glitches under steady-state operation
@@ -139,7 +230,7 @@ The initial prototype has revealed a number of risks that should be addressed or
 | Risk | Severity | Description | Mitigation
 |--|--|--|--|
 | Ring buffer overflow | Low | If DSP part is slow compared to HackRF raw I/Q transfering speed, the buffer will be full. This sould not lead to a buffer overflow problem | Log warning, discard oldest samples, reproduce with unit tests
-| I/Q data loss due to a Unix pipe backpressure| High | When consuming party is slow (e.g. audio output), it can not cosume data at the same speed as HackRF produces and DSP processes it, leading to a full Linux kernel pipe 64 Kb buffer with stopping data transferring | Consuming party should work fast and be configured properly
+| I/Q data loss due to a Unix pipe backpressure| High | When consuming party is slow (e.g. audio output), it can not cosume data at the same speed as HackRF produces and DSP processes it, leading to a full Linux kernel pipe 64 Kb buffer with stopping data transferring | Consuming party should work fast and be configured properly. The I/Q backend could support non-blocking writes.
 | Lack of CPU computational resources or data transfering speed | Medium | | Use performance tests and log execution over time to be able to visually assess the performance
 | Desynchronization of different algorithms | High | Different algorythms in DSP pipline require different decimation, work against different RF frequencies and use different demodulation technics (e.g. sound vs metadata) | This should be part of the technical design. Use intergation tests with decent number of scenarious.
 
