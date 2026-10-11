@@ -1,5 +1,3 @@
-> This document is non-complete and in process of creation
-
 # Introduction and Goals
 
 ## Background
@@ -136,8 +134,6 @@ The following table lists the external systems and internal containers that comp
 
 ## Context & Container Diagram
 
-Notice: Mermaid diagram renders the PlantUML C4 extension poorly
-
 ```mermaid
 C4Container
 title C4: Context & Container Diagram of SDR FM Analyzer (as a code)
@@ -162,6 +158,7 @@ Rel_U(audioOut, user, "Emits sound", "Speakers")
 
 UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 ``` 
+Notice: Mermaid diagram renders the PlantUML C4 extension poorly
 
 ## Component diagram
 
@@ -175,8 +172,6 @@ The following table details the internal components of the I/Q Processing Backen
 | Ring Buffer | Concurrency queue | Lock-free Single-Producer Single-Consumer (SPSC) circular buffer with C11 atomics. Decouples high-priority USB transfers from DSP processing. |
 | DSP Pipeline | Core logic | Performs frequency mixing (off-tuning correction), decimation, FM polar discrimination, de-emphasis, and audio resampling. |
 | Orchestrator | Process coordinator | Manages application lifecycle, drives the consumer loop reading from the ring buffer, invokes DSP blocks, and writes PCM frames to `stdout`. |
-
-Notice: Mermaid diagram renders the PlantUML C4 extension poorly
 
 ```mermaid
 C4Component
@@ -209,6 +204,7 @@ Rel(user, cli, "Executes with CLI arguments")
 
 UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 ```
+Notice: Mermaid diagram renders the PlantUML C4 extension poorly
 
 # Cross-cutting Concepts
 
