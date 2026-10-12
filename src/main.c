@@ -12,8 +12,8 @@
 
 #define DEFAULT_FREQ_HZ         101500000ULL // 101.5 MHz
 #define DEFAULT_SAMPLE_RATE     8000000U     // 8 MSPS as recommended on https://hackrf.readthedocs.io/en/latest/sampling_rate.html
-#define DEFAULT_LNA_GAIN        32U          // 0-40 dB in 8 dB steps
-#define DEFAULT_VGA_GAIN        20U          // 0-62 dB in 2 dB steps
+#define DEFAULT_LNA_GAIN        24U          // 0-40 dB in 8 dB steps
+#define DEFAULT_VGA_GAIN        16U          // 0-62 dB in 2 dB steps
 #define DEFAULT_AUDIO_RATE      48000U       // 48 kHz standard audio
 #define RING_BUFFER_SIZE        (4 * 1024 * 1024) // 4 MB I/O receive buffer
 #define CHUNK_READ_SIZE         (64 * 1024)       // 64 KB block per DSP run
@@ -61,6 +61,7 @@ int main(int argc, char *argv[]) {
         .output_sample_rate = DEFAULT_AUDIO_RATE,
         .freq_offset_hz = 250000, // 250 kHz offset to avoid DC spike
         .deemphasis_us = 50.0f,   // 50 us is European standard
+        .max_input_chunk_bytes = CHUNK_READ_SIZE,
     };
 
     int opt;
