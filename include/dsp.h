@@ -12,11 +12,20 @@
 typedef struct dsp_pipeline dsp_pipeline_t;
 
 typedef struct {
-    uint32_t input_sample_rate;   /* e.g., 8000000 (8 MSPS from HackRF) */
-    uint32_t output_sample_rate;  /* e.g., 48000 (standard audio rate) */
-    int32_t  freq_offset_hz;      /* e.g., +250000 to off-tune from HackRF DC spike */
-    float    deemphasis_us;       /* 50.0f (Europe) or 75.0f (US) */
+    uint32_t input_sample_rate;     /* e.g., 8000000 (8 MSPS from HackRF) */
+    uint32_t output_sample_rate;    /* e.g., 48000 (standard audio rate) */
+    int32_t  freq_offset_hz;        /* e.g., +250000 to off-tune from HackRF DC spike */
+    float    deemphasis_us;         /* 50.0f (Europe) or 75.0f (US) */
+    size_t   max_input_chunk_bytes; /* Max raw I/Q chunk size in bytes per dsp_process call */
 } dsp_config_t;
+
+/**
+ * Complex sample representation for decimated baseband I/Q.
+ */
+typedef struct {
+    float i;
+    float q;
+} complex_sample_t;
 
 /**
  * Create and configure the DSP pipeline.
@@ -54,5 +63,28 @@ size_t dsp_process_iq_to_pcm(dsp_pipeline_t *dsp,
                              int16_t *out_pcm,
                              size_t max_pcm_len);
 
+/**
+ * Downconverts and decimates raw interleaved 8-bit I/Q samples from HackRF.
+ *
+ * Operations performed:
+ * 1. Normalizes raw signed 8-bit I/Q [I0, Q0, I1, Q1, ...] to floating point [-1.0, 1.0].
+ * 2. Applies digital frequency translation (software mixer) using dsp->phase and dsp->phase_step
+ *    to shift the target station away from the HackRF DC center spike.
+ * 3. Applies anti-aliasing channel low-pass filtering and decimation by factor M
+ *    (e.g., 8 MSPS -> 250 kSPS, factor M = 32).
+ *
+ * @param dsp             Pointer to the DSP pipeline state (maintains mixer phase & filter state).
+ * @param raw_iq          Input buffer of interleaved int8_t samples [I0, Q0, I1, Q1, ...].
+ * @param raw_iq_bytes    Total byte length of raw_iq (must be even, = 2 * number of raw samples).
+ * @param out_decim_iq    Output buffer to receive decimated normalized complex samples.
+ * @param max_out_samples Maximum capacity of out_decim_iq (in complex_sample_t elements).
+ *
+ * @return Number of decimated complex samples written to out_decim_iq.
+ */
+size_t rf_downconvert_and_decimate(dsp_pipeline_t *dsp,
+                             const int8_t *raw_iq,
+                             size_t raw_iq_bytes,
+                             complex_sample_t *out_complex_samples,
+                             size_t max_out_samples);
 
 #endif /* DSP_H */
