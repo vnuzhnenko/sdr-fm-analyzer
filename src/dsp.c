@@ -131,27 +131,20 @@ size_t dsp_process_iq_to_pcm(
         return 0;
     }
 
+    // Processing tier 1: Decimation of high-rate RF domain
     size_t num_complex_samples = rf_downconvert_and_decimate(
         dsp, raw_iq, raw_iq_len, dsp->decimation_buffer, dsp->decimation_capacity
     );
 
-    // size_t mpx_samples = fm_demodulate_to_mpx(
-    //     dsp, dsp->decimation_buffer, num_complex_samples, dsp->mpx_buffer, dsp->mpx_buffer_capacity
-    // );
+    // Processing Tier 2: FM demoduation
+    size_t num_mpx_samples = fm_demodulate_to_mpx(
+        dsp, dsp->decimation_buffer, num_complex_samples, dsp->mpx_buffer, dsp->mpx_buffer_capacity
+    );
 
+    // Processing Tier 3: Specialezed consumers
     size_t pcm_samples_written = 0;
-    for (size_t n = 0; n < num_complex_samples; n++) {
-        float decimated_i = dsp->decimation_buffer[n].i;
-        float decimated_q = dsp->decimation_buffer[n].q;
-
-        // Core of FM demodulation
-        // Calculating Δθ = atan2 (Q[n], I[n]) - atan2 (Q[n-1], I[n-1])
-        // by using complex conjugate that uses only one atan2 call:
-        // Δθ = atan2 (Q[n] * I[n-1] - I[n] * Q[n-1], I[n] * I[n-1] + Q[n] * Q[n-1])
-        float angle = atan2f(decimated_q * dsp->prev_i - decimated_i * dsp->prev_q, decimated_i * dsp->prev_i + decimated_q * dsp->prev_q);
-
-        dsp->prev_i = decimated_i;
-        dsp->prev_q = decimated_q;
+    for (size_t n = 0; n < num_mpx_samples; n++) {
+        float angle = dsp->mpx_buffer[n];
 
         // Apply single-pole IIR de-emphasis filter.
         // It is still possbile to completely bypass it with

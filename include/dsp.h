@@ -93,12 +93,16 @@ size_t rf_downconvert_and_decimate(
 
 /**
  * Performs FM demodulation over a decimated buffer
+ * 
+ * Receives I/Q values, does FM demodulation and writes angles in radians to output buffer
  *
  * @param dsp             Pointer to the DSP pipeline state
  * @param complex_samples Input buffer of decimates normilize complex samples
  * @param num_samples     Number of complex samples in the intpu buffre to process
  * @param out_mpx         Output buffer of float values to receive FM Multiplex baseband
  * @param max_out_bytes   Maximum capacity of out_max in bytes
+ *
+ * @return Number of float samples written to out_mpx
  */
 size_t fm_demodulate_to_mpx(
     dsp_pipeline_t *dsp,
