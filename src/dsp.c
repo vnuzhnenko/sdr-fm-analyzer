@@ -120,11 +120,13 @@ void dsp_destroy(dsp_pipeline_t *dsp) {
     free(dsp);
 }
 
-size_t dsp_process_iq_to_pcm(dsp_pipeline_t *dsp,
-                             const int8_t *raw_iq,
-                             size_t raw_iq_len,
-                             int16_t *out_pcm,
-                             size_t max_pcm_len) {
+size_t dsp_process_iq_to_pcm(
+    dsp_pipeline_t *dsp,
+    const int8_t *raw_iq,
+    size_t raw_iq_len,
+    int16_t *out_pcm,
+    size_t max_pcm_len
+) {
     if (!dsp || !raw_iq || !out_pcm || raw_iq_len == 0 || max_pcm_len == 0) {
         return 0;
     }
@@ -132,6 +134,10 @@ size_t dsp_process_iq_to_pcm(dsp_pipeline_t *dsp,
     size_t num_complex_samples = rf_downconvert_and_decimate(
         dsp, raw_iq, raw_iq_len, dsp->decimation_buffer, dsp->decimation_capacity
     );
+
+    // size_t mpx_samples = fm_demodulate_to_mpx(
+    //     dsp, dsp->decimation_buffer, num_complex_samples, dsp->mpx_buffer, dsp->mpx_buffer_capacity
+    // );
 
     size_t pcm_samples_written = 0;
     for (size_t n = 0; n < num_complex_samples; n++) {
@@ -188,11 +194,13 @@ size_t dsp_process_iq_to_pcm(dsp_pipeline_t *dsp,
 /**
  * Get raw data from HackRF, downconvert it and decimate
  */
-size_t rf_downconvert_and_decimate(dsp_pipeline_t *dsp,
-                             const int8_t *raw_iq,
-                             size_t raw_iq_bytes,
-                             complex_sample_t *out_complex_samples,
-                             size_t max_out_samples) {
+size_t rf_downconvert_and_decimate(
+    dsp_pipeline_t *dsp,
+    const int8_t *raw_iq,
+    size_t raw_iq_bytes,
+    complex_sample_t *out_complex_samples,
+    size_t max_out_samples
+) {
 
     if (!dsp || !raw_iq || !out_complex_samples || raw_iq_bytes == 0 || max_out_samples == 0) {
         return 0;
@@ -242,4 +250,36 @@ size_t rf_downconvert_and_decimate(dsp_pipeline_t *dsp,
         }
     }
     return complex_samples_written;
+}
+
+/**
+ * Demodulate decimated I/Q samples into FM Multiplex Baseband
+ */
+size_t fm_demodulate_to_mpx(
+    dsp_pipeline_t *dsp,
+    const complex_sample_t *complex_samples,
+    size_t num_complex_samples,
+    float *out_mpx,
+    size_t out_mpx_capacity
+) {
+    if (!dsp || !complex_samples || num_complex_samples == 0 || !out_mpx || out_mpx_capacity == 0) {
+        return 0;
+    }
+
+    size_t processed_complex_samples = 0;
+    for (size_t n = 0; n < num_complex_samples && n < out_mpx_capacity; n++) {
+        float decimated_i = complex_samples[n].i;
+        float decimated_q = complex_samples[n].q;
+
+        // Core of FM demodulation
+        // Calculating Δθ = atan2 (Q[n], I[n]) - atan2 (Q[n-1], I[n-1])
+        // by using complex conjugate that uses only one atan2 call:
+        // Δθ = atan2 (Q[n] * I[n-1] - I[n] * Q[n-1], I[n] * I[n-1] + Q[n] * Q[n-1])
+        float angle = atan2f(decimated_q * dsp->prev_i - decimated_i * dsp->prev_q, decimated_i * dsp->prev_i + decimated_q * dsp->prev_q);
+
+        dsp->prev_i = decimated_i;
+        dsp->prev_q = decimated_q;
+        out_mpx[processed_complex_samples++] = angle;
+    }
+    return processed_complex_samples;
 }
