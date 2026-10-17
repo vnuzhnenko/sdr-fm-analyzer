@@ -10,22 +10,28 @@
 struct dsp_pipeline {
     dsp_config_t config;
 
-    /* Decimation filter step and accumulators */
+    /* -- Software mixer (off-tune) configuration */
+
+    float mixer_phase; // Phase accumulator for frequency translation mixer
+    float mixer_phase_step;
+
+    /* -- I/Q Decimation filter step and accumulators */
+
     int decimation; // 2, 3, 4, 8, 16, 32...
     complex_sample_t *decimation_buffer;
-    size_t decimation_capacity; // max number of compex_sample_t elements in buffer
+    size_t decimation_capacity; // max number of complex_sample_t elements in buffer
     int decimated_counter;
     float decimated_sum_i;
     float decimated_sum_q;
 
-    /* Previous complex sample for polar discriminator (FM demod) */
+    /* -- Demodulation to FM Mupliplex basenband (MPX) */
+
+    float *mpx_buffer;
+    size_t mpx_buffer_capacity;
+
+    /* Previous complex sample for polar discriminator */
     float prev_i;
     float prev_q;
-
-    /* Phase accumulator for frequency translation mixer */
-    float phase;
-    float phase_step;
-
     /* De-emphasis filter state and coefficient */
     float deemphasis_state;
     float deemphasis_alpha;
@@ -43,12 +49,14 @@ dsp_pipeline_t* dsp_create(const dsp_config_t *cfg) {
     if (!dsp) return NULL;
 
     dsp->config = *cfg;
-    dsp->prev_i = 0.0f;
-    dsp->prev_q = 0.0f;
-    dsp->phase = 0.0f;
+
+    /* -- Software mixer (off-tune) */
 
     // Mixer phase step to off-tune the HackRF center skipe: 2 * PI * f_offset / f_in
-    dsp->phase_step = 2.0f * (float)M_PI * (float)cfg->freq_offset_hz / (float)cfg->input_sample_rate;
+    dsp->mixer_phase_step = 2.0f * (float)M_PI * (float)cfg->freq_offset_hz / (float)cfg->input_sample_rate;
+    dsp->mixer_phase = 0.0f;
+
+    /* -- Init I/Q decimation pipeline */
 
     // Calculate a decimation step and reset accumulators
     // This is a low pass filter actually
@@ -66,9 +74,21 @@ dsp_pipeline_t* dsp_create(const dsp_config_t *cfg) {
     dsp->decimation_capacity = (max_raw_iq_samples / safe_decimation) + 1;
     dsp->decimation_buffer = (complex_sample_t *)malloc(dsp->decimation_capacity * sizeof(complex_sample_t));
     if (!dsp->decimation_buffer) {
-        free(dsp);
+        dsp_destroy(dsp);
         return NULL;
     }
+
+    /* -- Init FM demodulation pipeline */
+
+    dsp->mpx_buffer_capacity = dsp->decimation_capacity; // keep the same sample rate as for decimation
+    dsp->mpx_buffer = (float *)malloc(dsp->mpx_buffer_capacity * sizeof(float));
+    if (!dsp->mpx_buffer) {
+        dsp_destroy(dsp);
+        return NULL;
+    }
+
+    dsp->prev_i = 0.0f;
+    dsp->prev_q = 0.0f;
 
     /*
      * De-emphasis single-pole IIR filter coefficient:
@@ -93,6 +113,9 @@ void dsp_destroy(dsp_pipeline_t *dsp) {
     if (!dsp) return;
     if (dsp->decimation_buffer) {
         free(dsp->decimation_buffer);
+    }
+    if (dsp->mpx_buffer) {
+        free(dsp->mpx_buffer);
     }
     free(dsp);
 }
@@ -184,18 +207,18 @@ size_t rf_downconvert_and_decimate(dsp_pipeline_t *dsp,
         float q = raw_iq[n * 2 + 1] / MAX_INBOUND_IQ_VALUE;
 
         // Shift the frequency by doing mixing: (i + j*q) * (cos(phase) + j*sin(phase))
-        float cos_val = cosf(dsp->phase);
-        float sin_val = sinf(dsp->phase);
+        float cos_val = cosf(dsp->mixer_phase);
+        float sin_val = sinf(dsp->mixer_phase);
         float mixed_i = i * cos_val - q * sin_val;
         float mixed_q = i * sin_val + q * cos_val;
 
-        dsp->phase += dsp->phase_step;
+        dsp->mixer_phase += dsp->mixer_phase_step;
         // keep phase in the range [-PI, +PI], to prevent a buffer overflow with accumulation
         // Use  [-PI, +PI], not [0, +2PI] to keep compatibility with tan2f(y, x)
-        if (dsp->phase > (float)M_PI) {
-            dsp->phase -= 2.0f * (float)M_PI;
-        } else if (dsp->phase < -(float)M_PI) {
-            dsp->phase += 2.0f * (float)M_PI;
+        if (dsp->mixer_phase > (float)M_PI) {
+            dsp->mixer_phase -= 2.0f * (float)M_PI;
+        } else if (dsp->mixer_phase < -(float)M_PI) {
+            dsp->mixer_phase += 2.0f * (float)M_PI;
         }
 
         // Accumulate for further decimation
