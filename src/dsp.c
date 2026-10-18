@@ -1,4 +1,5 @@
 #include "dsp.h"
+#include "biquad_filter.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -28,6 +29,8 @@ struct dsp_pipeline {
 
     float *mpx_buffer;
     size_t mpx_buffer_capacity;
+
+    biquad_t mono_lpf;
 
     /* Previous complex sample for polar discriminator */
     float prev_i;
@@ -87,6 +90,8 @@ dsp_pipeline_t* dsp_create(const dsp_config_t *cfg) {
         return NULL;
     }
 
+    biquad_init_lowpass(&dsp->mono_lpf, 15000.0f, FM_DECIMATED_RATE);
+
     dsp->prev_i = 0.0f;
     dsp->prev_q = 0.0f;
 
@@ -140,6 +145,9 @@ size_t dsp_process_iq_to_pcm(
     size_t num_mpx_samples = fm_demodulate_to_mpx(
         dsp, dsp->decimation_buffer, num_complex_samples, dsp->mpx_buffer, dsp->mpx_buffer_capacity
     );
+
+    // TODO move this filter to a specealized Mono consumer 
+    biquad_process(&dsp->mono_lpf, dsp->mpx_buffer, dsp->mpx_buffer, num_mpx_samples);
 
     // Processing Tier 3: Specialezed consumers
     size_t pcm_samples_written = 0;
