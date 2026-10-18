@@ -206,6 +206,37 @@ UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 ```
 Notice: Mermaid diagram renders the PlantUML C4 extension poorly
 
+### Digital Signal Processing plipeline: the FM Mupliplex (MPX) bus model
+
+As FM signal carries different types of data - audio and metadata, the architecture decouples processing of samples into three distinct rate tiers. This also allows to split demodulation into different modules.
+
+```mermaid
+flowchart TD
+    subgraph Tier1 ["Tier 1: High-Rate RF Domain (8 MSPS)"]
+        A["raw_iq buffer (USB)"] --> B["Digital Mixer (DC Spike Avoidance)"]
+        B --> C["Channel Decimation Filter"]
+    end
+    
+    C -->|"Decimated I/Q at 250 kSPS"| D["FM Polar Discriminator (atan2f)"]
+    
+    subgraph Tier2 ["Tier 2: Intermediate Baseband Domain (250 kSPS MPX Bus)"]
+        D --> MPX["float mpx_buffer[]"]
+    end
+    
+    subgraph Tier3 ["Tier 3: Specialized Consumer Branches"]
+        MPX --> E["Mono Audio Branch (LPF under 15 kHz)"]
+        MPX --> F["Stereo Audio Branch (19 kHz Pilot + 38 kHz Subcarrier)"]
+        MPX --> G["RDS Metadata Branch (57 kHz BPSK + Manchester)"]
+    end
+    
+    E --> H["Stereo Matrix (L, R)"]
+    F --> H
+    H --> I["Fractional Resampler to 48 kHz PCM"]
+    G --> J["Event Callback to Station Metadata"]
+
+    style MPX fill:#f96,stroke:#333,stroke-width:3px
+```
+
 # Cross-cutting Concepts
 
 * The only supported language is English
