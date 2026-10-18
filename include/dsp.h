@@ -57,11 +57,13 @@ void dsp_destroy(dsp_pipeline_t *dsp);
  * @param max_pcm_len Maximum capacity of out_pcm (in number of int16_t elements)
  * @return Number of int16_t audio samples written to out_pcm
  */
-size_t dsp_process_iq_to_pcm(dsp_pipeline_t *dsp,
-                             const int8_t *raw_iq,
-                             size_t raw_iq_len,
-                             int16_t *out_pcm,
-                             size_t max_pcm_len);
+size_t dsp_process_iq_to_pcm(
+    dsp_pipeline_t *dsp,
+    const int8_t *raw_iq,
+    size_t raw_iq_len,
+    int16_t *out_pcm,
+    size_t max_pcm_len
+);
 
 /**
  * Downconverts and decimates raw interleaved 8-bit I/Q samples from HackRF.
@@ -81,10 +83,33 @@ size_t dsp_process_iq_to_pcm(dsp_pipeline_t *dsp,
  *
  * @return Number of decimated complex samples written to out_decim_iq.
  */
-size_t rf_downconvert_and_decimate(dsp_pipeline_t *dsp,
-                             const int8_t *raw_iq,
-                             size_t raw_iq_bytes,
-                             complex_sample_t *out_complex_samples,
-                             size_t max_out_samples);
+size_t rf_downconvert_and_decimate(
+    dsp_pipeline_t *dsp,
+    const int8_t *raw_iq,
+    size_t raw_iq_bytes,
+    complex_sample_t *out_complex_samples,
+    size_t max_out_samples
+);
+
+/**
+ * Performs FM demodulation over a decimated buffer
+ * 
+ * Receives I/Q values, does FM demodulation and writes angles in radians to output buffer
+ *
+ * @param dsp             Pointer to the DSP pipeline state
+ * @param complex_samples Input buffer of decimates normilize complex samples
+ * @param num_samples     Number of complex samples in the intpu buffre to process
+ * @param out_mpx         Output buffer of float values to receive FM Multiplex baseband
+ * @param max_out_bytes   Maximum capacity of out_max in bytes
+ *
+ * @return Number of float samples written to out_mpx
+ */
+size_t fm_demodulate_to_mpx(
+    dsp_pipeline_t *dsp,
+    const complex_sample_t *complex_samples,
+    size_t num_complex_samples,
+    float *out_mpx,
+    size_t out_mpx_capacity
+);
 
 #endif /* DSP_H */
