@@ -1,4 +1,5 @@
 #include "dsp.h"
+#include "stereo_demod.h"
 #include "biquad_filter.h"
 #include <stdlib.h>
 #include <string.h>
@@ -39,7 +40,12 @@ struct dsp_pipeline {
     float deemphasis_state;
     float deemphasis_alpha;
 
-    /* Audio resampling */
+    /* -- MPX to Stereo demodulation */
+
+    stereo_demod_t *stereo_demodulation;
+
+    /* -- Audio resampling */
+
     float audio_resample_step; 
     float audio_resample_acc;
     float audio_previous_sample;
@@ -107,6 +113,16 @@ dsp_pipeline_t* dsp_create(const dsp_config_t *cfg) {
         dsp->deemphasis_alpha = 1.0f; /* Passthrough */
     }
 
+    /* -- Stereo demodulation */
+
+    dsp->stereo_demodulation = stereo_demod_create(FM_DECIMATED_RATE, dsp->mpx_buffer_capacity);
+    if (!dsp->stereo_demodulation) {
+        dsp_destroy(dsp);
+        return NULL;
+    }
+
+    /* -- Audio resampling */
+
     dsp->audio_resample_step = (float)cfg->output_sample_rate / FM_DECIMATED_RATE;
     dsp->audio_resample_acc = 0.0;
     dsp->audio_previous_sample = 0.0;
@@ -121,6 +137,9 @@ void dsp_destroy(dsp_pipeline_t *dsp) {
     }
     if (dsp->mpx_buffer) {
         free(dsp->mpx_buffer);
+    }
+    if (dsp->stereo_demodulation) {
+        stereo_demod_destroy(dsp->stereo_demodulation);
     }
     free(dsp);
 }
