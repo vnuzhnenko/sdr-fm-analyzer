@@ -13,8 +13,9 @@ stereo_demod_t* stereo_demod_create(float sample_rate_hz, size_t max_samples);
 void stereo_demod_destroy(stereo_demod_t *stereo);
 
 /**
- * @param stereo_demot_t 
- * @param mpx_samples Number of MPX float samples available for processing
+ * @param stereo_demod_t Pointer the stereo_demod_t 
+ * @param mxp_in FM MPX buffer
+ * @param mxp_samples Number of MPX float samples available for processing
  */
 void extract_19khz_tone(stereo_demod_t *stereo, const float *mpx_in, size_t mpx_samples);
 
