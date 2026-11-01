@@ -138,9 +138,7 @@ void dsp_destroy(dsp_pipeline_t *dsp) {
     if (dsp->mpx_buffer) {
         free(dsp->mpx_buffer);
     }
-    if (dsp->stereo_demodulation) {
-        stereo_demod_destroy(dsp->stereo_demodulation);
-    }
+    stereo_demod_destroy(dsp->stereo_demodulation);
     free(dsp);
 }
 
