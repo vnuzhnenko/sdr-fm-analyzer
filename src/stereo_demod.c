@@ -136,6 +136,7 @@ static void synthesize_38khz_carrier(stereo_demod_t *self, size_t num_samples) {
     }
     // avarage is also used to determine if there is a stero signal
     self->is_stereo = (self->pilot_energy_avg > 0.0015f);
+    // self->is_stereo = false;
 }
 
 /**
