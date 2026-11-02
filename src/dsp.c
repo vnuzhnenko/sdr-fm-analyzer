@@ -1,4 +1,5 @@
 #include "dsp.h"
+#include "stereo_demod.h"
 #include "biquad_filter.h"
 #include <stdlib.h>
 #include <string.h>
@@ -30,19 +31,25 @@ struct dsp_pipeline {
     float *mpx_buffer;
     size_t mpx_buffer_capacity;
 
-    biquad_t mono_lpf;
-
     /* Previous complex sample for polar discriminator */
     float prev_i;
     float prev_q;
+
+    /* -- MPX to Stereo demodulation */
+
+    stereo_demod_t *stereo_demodulation;
+
     /* De-emphasis filter state and coefficient */
-    float deemphasis_state;
+    float deemphasis_state_left;
+    float deemphasis_state_right;
     float deemphasis_alpha;
 
-    /* Audio resampling */
+    /* -- Audio resampling */
+
     float audio_resample_step; 
     float audio_resample_acc;
-    float audio_previous_sample;
+    float audio_previous_left;
+    float audio_previous_right;
 };
 
 dsp_pipeline_t* dsp_create(const dsp_config_t *cfg) {
@@ -90,10 +97,16 @@ dsp_pipeline_t* dsp_create(const dsp_config_t *cfg) {
         return NULL;
     }
 
-    biquad_init_lowpass(&dsp->mono_lpf, 15000.0f, FM_DECIMATED_RATE);
-
     dsp->prev_i = 0.0f;
     dsp->prev_q = 0.0f;
+
+    /* -- Stereo demodulation */
+
+    dsp->stereo_demodulation = stereo_demod_create(FM_DECIMATED_RATE, dsp->mpx_buffer_capacity);
+    if (!dsp->stereo_demodulation) {
+        dsp_destroy(dsp);
+        return NULL;
+    }
 
     /*
      * De-emphasis single-pole IIR filter coefficient:
@@ -102,14 +115,19 @@ dsp_pipeline_t* dsp_create(const dsp_config_t *cfg) {
      */
     if (cfg->deemphasis_us > 0.0f) {
         float tau = cfg->deemphasis_us * 1e-6f;
-        dsp->deemphasis_alpha = 1.0f - expf(-1.0f / ((float)cfg->output_sample_rate * tau));
+        dsp->deemphasis_alpha = 1.0f - expf(-1.0f / (FM_DECIMATED_RATE * tau));
     } else {
         dsp->deemphasis_alpha = 1.0f; /* Passthrough */
     }
+    dsp->deemphasis_state_left = 0.0f;
+    dsp->deemphasis_state_right = 0.0f;
+
+    /* -- Audio resampling */
 
     dsp->audio_resample_step = (float)cfg->output_sample_rate / FM_DECIMATED_RATE;
     dsp->audio_resample_acc = 0.0;
-    dsp->audio_previous_sample = 0.0;
+    dsp->audio_previous_left = 0.0;
+    dsp->audio_previous_right = 0.0;
 
     return dsp;
 }
@@ -122,6 +140,7 @@ void dsp_destroy(dsp_pipeline_t *dsp) {
     if (dsp->mpx_buffer) {
         free(dsp->mpx_buffer);
     }
+    stereo_demod_destroy(dsp->stereo_demodulation);
     free(dsp);
 }
 
@@ -146,29 +165,43 @@ size_t dsp_process_iq_to_pcm(
         dsp, dsp->decimation_buffer, num_complex_samples, dsp->mpx_buffer, dsp->mpx_buffer_capacity
     );
 
-    // TODO move this filter to a specealized Mono consumer 
-    biquad_process(&dsp->mono_lpf, dsp->mpx_buffer, dsp->mpx_buffer, num_mpx_samples);
-
     // Processing Tier 3: Specialezed consumers
+    // Process mono and stereo signals
+    stereo_demod_process(dsp->stereo_demodulation, dsp->mpx_buffer, num_mpx_samples);
+    const float *left_channel = stereo_demod_get_left(dsp->stereo_demodulation);
+    const float *right_channel = stereo_demod_get_right(dsp->stereo_demodulation);
+
     size_t pcm_samples_written = 0;
     for (size_t n = 0; n < num_mpx_samples; n++) {
-        float angle = dsp->mpx_buffer[n];
+        float angle_left = left_channel[n];
+        float angle_right = right_channel[n];
 
         // Apply single-pole IIR de-emphasis filter.
         // It is still possbile to completely bypass it with
         //   float audio_sample = angle;
-        dsp->deemphasis_state += dsp->deemphasis_alpha * (angle - dsp->deemphasis_state);
-        float audio_sample = dsp->deemphasis_state;
+        dsp->deemphasis_state_left += dsp->deemphasis_alpha * (angle_left - dsp->deemphasis_state_left);
+        dsp->deemphasis_state_right += dsp->deemphasis_alpha * (angle_right - dsp->deemphasis_state_right);
+        float audio_sample_left = dsp->deemphasis_state_left;
+        float audio_sample_right = dsp->deemphasis_state_right;
 
-        float audio_scaled = audio_sample * (float)INT16_MAX;
-
-        if (audio_scaled > (float)INT16_MAX)
+        float audio_scaled_left = audio_sample_left * (float)INT16_MAX;
+        if (audio_scaled_left > (float)INT16_MAX)
         {
-            audio_scaled = (float)INT16_MAX;
+            audio_scaled_left = (float)INT16_MAX;
         }
-        else if (audio_scaled < (float)INT16_MIN)
+        else if (audio_scaled_left < (float)INT16_MIN)
         {
-            audio_scaled = (float)INT16_MIN;
+            audio_scaled_left = (float)INT16_MIN;
+        }
+
+        float audio_scaled_right = audio_sample_right * (float)INT16_MAX;
+        if (audio_scaled_right > (float)INT16_MAX)
+        {
+            audio_scaled_right = (float)INT16_MAX;
+        }
+        else if (audio_scaled_right < (float)INT16_MIN)
+        {
+            audio_scaled_right = (float)INT16_MIN;
         }
 
         // 250 KHz -> 48 KHz linear downsampling
@@ -179,14 +212,17 @@ size_t dsp_process_iq_to_pcm(
 
             // Fraction between previous sample and current sample
             float mu = dsp->audio_resample_acc / dsp->audio_resample_step;
-            float linered_sample = (1 - mu) * dsp->audio_previous_sample + mu * audio_scaled;
+            float linered_sample_left = (1 - mu) * dsp->audio_previous_left + mu * audio_scaled_left;
+            float linered_sample_right = (1 - mu) * dsp->audio_previous_right + mu * audio_scaled_right;
 
-            if (pcm_samples_written < max_pcm_len)
+            if (pcm_samples_written + 1 < max_pcm_len)
             {
-                out_pcm[pcm_samples_written++] = (int16_t)linered_sample;
+                out_pcm[pcm_samples_written++] = (int16_t)linered_sample_left;
+                out_pcm[pcm_samples_written++] = (int16_t)linered_sample_right;
             }
         }
-        dsp->audio_previous_sample = audio_scaled;
+        dsp->audio_previous_left = audio_scaled_left;
+        dsp->audio_previous_right = audio_scaled_right;
     }
 
     return pcm_samples_written;
