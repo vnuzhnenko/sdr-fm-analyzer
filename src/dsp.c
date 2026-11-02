@@ -163,6 +163,9 @@ size_t dsp_process_iq_to_pcm(
         dsp, dsp->decimation_buffer, num_complex_samples, dsp->mpx_buffer, dsp->mpx_buffer_capacity
     );
 
+    // Extract stereo difference if exists
+    stereo_demod_process(dsp->stereo_demodulation, dsp->mpx_buffer, num_mpx_samples);
+
     // TODO move this filter to a specealized Mono consumer 
     biquad_process(&dsp->mono_lpf, dsp->mpx_buffer, dsp->mpx_buffer, num_mpx_samples);
 
