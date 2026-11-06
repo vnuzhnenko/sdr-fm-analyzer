@@ -1,6 +1,6 @@
 #include "dsp.h"
+#include "audio_out.h"
 #include "stereo_demod.h"
-#include "biquad_filter.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -9,6 +9,17 @@
 #define FM_CHANNEL_CUTOFF 100000.0f // 100 kHz (±100 kHz for 200 kHz FM channel)
 #define MAX_INBOUND_IQ_VALUE 128.0f
 
+/**
+ * Complex sample representation for decimated baseband I/Q.
+ */
+typedef struct {
+    float i;
+    float q;
+} complex_sample_t;
+
+/**
+ * DSP Pipeline State
+ */
 struct dsp_pipeline {
     dsp_config_t config;
 
@@ -39,19 +50,14 @@ struct dsp_pipeline {
 
     stereo_demod_t *stereo_demodulation;
 
-    /* De-emphasis filter state and coefficient */
-    float deemphasis_state_left;
-    float deemphasis_state_right;
-    float deemphasis_alpha;
+    /* -- Audio out */
 
-    /* -- Audio resampling */
-
-    float audio_resample_step; 
-    float audio_resample_acc;
-    float audio_previous_left;
-    float audio_previous_right;
+    audio_out_t *audio_out;
 };
 
+/**
+ * Initializer
+ */
 dsp_pipeline_t* dsp_create(const dsp_config_t *cfg) {
     if (!cfg) return NULL;
 
@@ -108,130 +114,40 @@ dsp_pipeline_t* dsp_create(const dsp_config_t *cfg) {
         return NULL;
     }
 
-    /*
-     * De-emphasis single-pole IIR filter coefficient:
-     * time constant tau = deemphasis_us * 1e-6 s (e.g., 50 us -> 0.000050 s)
-     * alpha = 1.0 - exp(-1.0 / (sample_rate * tau))
-     */
-    if (cfg->deemphasis_us > 0.0f) {
-        float tau = cfg->deemphasis_us * 1e-6f;
-        dsp->deemphasis_alpha = 1.0f - expf(-1.0f / (FM_DECIMATED_RATE * tau));
-    } else {
-        dsp->deemphasis_alpha = 1.0f; /* Passthrough */
+    /* -- Audio out */
+
+    dsp->audio_out = audio_out_create(FM_DECIMATED_RATE, cfg->output_sample_rate, cfg->deemphasis_us);
+    if (!dsp->audio_out) {
+        dsp_destroy(dsp);
+        return NULL;
     }
-    dsp->deemphasis_state_left = 0.0f;
-    dsp->deemphasis_state_right = 0.0f;
-
-    /* -- Audio resampling */
-
-    dsp->audio_resample_step = (float)cfg->output_sample_rate / FM_DECIMATED_RATE;
-    dsp->audio_resample_acc = 0.0;
-    dsp->audio_previous_left = 0.0;
-    dsp->audio_previous_right = 0.0;
 
     return dsp;
 }
 
+/**
+ * Deinitializer
+ */
 void dsp_destroy(dsp_pipeline_t *dsp) {
     if (!dsp) return;
-    if (dsp->decimation_buffer) {
-        free(dsp->decimation_buffer);
-    }
-    if (dsp->mpx_buffer) {
-        free(dsp->mpx_buffer);
-    }
+    free(dsp->decimation_buffer);
+    free(dsp->mpx_buffer);
     stereo_demod_destroy(dsp->stereo_demodulation);
+    audio_out_destroy(dsp->audio_out);
     free(dsp);
 }
 
-size_t dsp_process_iq_to_pcm(
-    dsp_pipeline_t *dsp,
-    const int8_t *raw_iq,
-    size_t raw_iq_len,
-    int16_t *out_pcm,
-    size_t max_pcm_len
-) {
-    if (!dsp || !raw_iq || !out_pcm || raw_iq_len == 0 || max_pcm_len == 0) {
-        return 0;
-    }
-
-    // Processing tier 1: Decimation of high-rate RF domain
-    size_t num_complex_samples = rf_downconvert_and_decimate(
-        dsp, raw_iq, raw_iq_len, dsp->decimation_buffer, dsp->decimation_capacity
-    );
-
-    // Processing Tier 2: FM demoduation
-    size_t num_mpx_samples = fm_demodulate_to_mpx(
-        dsp, dsp->decimation_buffer, num_complex_samples, dsp->mpx_buffer, dsp->mpx_buffer_capacity
-    );
-
-    // Processing Tier 3: Specialezed consumers
-    // Process mono and stereo signals
-    stereo_demod_process(dsp->stereo_demodulation, dsp->mpx_buffer, num_mpx_samples);
-    const float *left_channel = stereo_demod_get_left(dsp->stereo_demodulation);
-    const float *right_channel = stereo_demod_get_right(dsp->stereo_demodulation);
-
-    size_t pcm_samples_written = 0;
-    for (size_t n = 0; n < num_mpx_samples; n++) {
-        float angle_left = left_channel[n];
-        float angle_right = right_channel[n];
-
-        // Apply single-pole IIR de-emphasis filter.
-        // It is still possbile to completely bypass it with
-        //   float audio_sample = angle;
-        dsp->deemphasis_state_left += dsp->deemphasis_alpha * (angle_left - dsp->deemphasis_state_left);
-        dsp->deemphasis_state_right += dsp->deemphasis_alpha * (angle_right - dsp->deemphasis_state_right);
-        float audio_sample_left = dsp->deemphasis_state_left;
-        float audio_sample_right = dsp->deemphasis_state_right;
-
-        float audio_scaled_left = audio_sample_left * (float)INT16_MAX;
-        if (audio_scaled_left > (float)INT16_MAX)
-        {
-            audio_scaled_left = (float)INT16_MAX;
-        }
-        else if (audio_scaled_left < (float)INT16_MIN)
-        {
-            audio_scaled_left = (float)INT16_MIN;
-        }
-
-        float audio_scaled_right = audio_sample_right * (float)INT16_MAX;
-        if (audio_scaled_right > (float)INT16_MAX)
-        {
-            audio_scaled_right = (float)INT16_MAX;
-        }
-        else if (audio_scaled_right < (float)INT16_MIN)
-        {
-            audio_scaled_right = (float)INT16_MIN;
-        }
-
-        // 250 KHz -> 48 KHz linear downsampling
-        dsp->audio_resample_acc += dsp->audio_resample_step;
-        if (dsp->audio_resample_acc >= 1.0)
-        {
-            dsp->audio_resample_acc -= 1.0f;
-
-            // Fraction between previous sample and current sample
-            float mu = dsp->audio_resample_acc / dsp->audio_resample_step;
-            float linered_sample_left = (1 - mu) * dsp->audio_previous_left + mu * audio_scaled_left;
-            float linered_sample_right = (1 - mu) * dsp->audio_previous_right + mu * audio_scaled_right;
-
-            if (pcm_samples_written + 1 < max_pcm_len)
-            {
-                out_pcm[pcm_samples_written++] = (int16_t)linered_sample_left;
-                out_pcm[pcm_samples_written++] = (int16_t)linered_sample_right;
-            }
-        }
-        dsp->audio_previous_left = audio_scaled_left;
-        dsp->audio_previous_right = audio_scaled_right;
-    }
-
-    return pcm_samples_written;
-}
-
 /**
- * Get raw data from HackRF, downconvert it and decimate
+ * Downconverts and decimates raw interleaved 8-bit I/Q samples from HackRF.
+ * 
+ * Operations performed:
+ * 1. Normalizes raw signed 8-bit I/Q [I0, Q0, I1, Q1, ...] to floating point [-1.0, 1.0].
+ * 2. Applies digital frequency translation (software mixer) using dsp->phase and dsp->phase_step
+ *    to shift the target station away from the HackRF DC center spike.
+ * 3. Applies anti-aliasing channel low-pass filtering and decimation by factor M
+ *    (e.g., 8 MSPS -> 250 kSPS, factor M = 32).
  */
-size_t rf_downconvert_and_decimate(
+static size_t rf_downconvert_and_decimate(
     dsp_pipeline_t *dsp,
     const int8_t *raw_iq,
     size_t raw_iq_bytes,
@@ -291,8 +207,9 @@ size_t rf_downconvert_and_decimate(
 
 /**
  * Demodulate decimated I/Q samples into FM Multiplex Baseband
+ * Receives I/Q values, does FM demodulation and writes angles in radians to output buffer
  */
-size_t fm_demodulate_to_mpx(
+static size_t fm_demodulate_to_mpx(
     dsp_pipeline_t *dsp,
     const complex_sample_t *complex_samples,
     size_t num_complex_samples,
@@ -319,4 +236,38 @@ size_t fm_demodulate_to_mpx(
         out_mpx[processed_complex_samples++] = angle;
     }
     return processed_complex_samples;
+}
+
+size_t dsp_process_iq_to_pcm(
+    dsp_pipeline_t *dsp,
+    const int8_t *raw_iq,
+    size_t raw_iq_len,
+    int16_t *out_pcm,
+    size_t max_pcm_len
+) {
+    if (!dsp || !raw_iq || !out_pcm || raw_iq_len == 0 || max_pcm_len == 0) {
+        return 0;
+    }
+
+    // Processing tier 1: Decimation of high-rate RF domain
+    size_t num_complex_samples = rf_downconvert_and_decimate(
+        dsp, raw_iq, raw_iq_len, dsp->decimation_buffer, dsp->decimation_capacity
+    );
+
+    // Processing Tier 2: FM demoduation
+    size_t num_mpx_samples = fm_demodulate_to_mpx(
+        dsp, dsp->decimation_buffer, num_complex_samples, dsp->mpx_buffer, dsp->mpx_buffer_capacity
+    );
+
+    // Processing Tier 3: Specialezed consumers
+
+    // Process mono and stereo signals
+    stereo_demod_process(dsp->stereo_demodulation, dsp->mpx_buffer, num_mpx_samples);
+
+    // Complete processing of audio signal
+    const float *left_channel = stereo_demod_get_left(dsp->stereo_demodulation);
+    const float *right_channel = stereo_demod_get_right(dsp->stereo_demodulation);
+    size_t pcm_samples_written = audio_out_process(dsp->audio_out, left_channel, right_channel, num_mpx_samples, out_pcm, max_pcm_len);
+
+    return pcm_samples_written;
 }
